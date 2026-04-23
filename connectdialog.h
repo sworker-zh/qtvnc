@@ -15,6 +15,7 @@ public:
     QString host() const;
     int port() const;
     QString password() const;
+    void setHost(const QString &host);
 
 private:
     QLineEdit *m_hostEdit;

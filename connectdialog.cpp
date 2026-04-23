@@ -50,3 +50,8 @@ QString ConnectDialog::password() const
 {
     return m_passwordEdit->text();
 }
+
+void ConnectDialog::setHost(const QString &host)
+{
+    m_hostEdit->setText(host);
+}
