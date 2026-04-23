@@ -3,9 +3,10 @@
 
 #include <QObject>
 #include <QString>
-#include <rfb/rfbclient.h>
 #include <thread>
 #include <atomic>
+
+class RfbConnection;
 
 class VncConnection : public QObject
 {
@@ -20,7 +21,12 @@ public:
     void setPassword(const QString &password);
     void start();
     void stop();
-    rfbClient *client() const;
+
+    RfbConnection *rfbConn() const;
+    int framebufferWidth() const;
+    int framebufferHeight() const;
+    const uint8_t *framebufferData() const;
+    void sendPointerEvent(int x, int y, int buttonMask);
 
 signals:
     void connected();
@@ -31,13 +37,10 @@ signals:
 private:
     void run();
 
-    static void onFinishedFrameBufferUpdate(rfbClient *cl);
-    static char *onGetPassword(rfbClient *cl);
-
     QString m_host;
     int m_port = 5900;
     QString m_password;
-    rfbClient *m_client = nullptr;
+    RfbConnection *m_rfbConn = nullptr;
     std::atomic<bool> m_running{false};
     std::thread m_thread;
 };

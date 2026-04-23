@@ -7,6 +7,13 @@
 #include <QWheelEvent>
 #include <QImage>
 
+// Mouse button masks (RFB protocol)
+static constexpr int RFB_BUTTON1 = 1;
+static constexpr int RFB_BUTTON2 = 2;
+static constexpr int RFB_BUTTON3 = 4;
+static constexpr int RFB_BUTTON4 = 8;
+static constexpr int RFB_BUTTON5 = 16;
+
 VncViewerWidget::VncViewerWidget(QWidget *parent)
     : QWidget(parent)
 {
@@ -57,9 +64,9 @@ QPointF VncViewerWidget::mousePos(QMouseEvent *event) const
 
 int VncViewerWidget::mapMouseButton(Qt::MouseButton button) const
 {
-    if (button == Qt::LeftButton)   return rfbButton1Mask;
-    if (button == Qt::MiddleButton) return rfbButton2Mask;
-    if (button == Qt::RightButton)  return rfbButton3Mask;
+    if (button == Qt::LeftButton)   return RFB_BUTTON1;
+    if (button == Qt::MiddleButton) return RFB_BUTTON2;
+    if (button == Qt::RightButton)  return RFB_BUTTON3;
     return 0;
 }
 
@@ -90,8 +97,8 @@ void VncViewerWidget::onFrameUpdated()
 void VncViewerWidget::onConnected()
 {
     m_connected = true;
-    if (m_connection && m_connection->client()) {
-        resize(m_connection->client()->width, m_connection->client()->height);
+    if (m_connection) {
+        resize(m_connection->framebufferWidth(), m_connection->framebufferHeight());
     }
 }
 
@@ -112,7 +119,7 @@ void VncViewerWidget::paintEvent(QPaintEvent *event)
 {
     Q_UNUSED(event);
 
-    if (!m_connection || !m_connection->client()) {
+    if (!m_connection || !m_connection->framebufferData()) {
         QPainter p(this);
         p.fillRect(rect(), Qt::black);
         p.setPen(Qt::white);
@@ -120,9 +127,11 @@ void VncViewerWidget::paintEvent(QPaintEvent *event)
         return;
     }
 
-    rfbClient *cl = m_connection->client();
-    QImage image(cl->frameBuffer, cl->width, cl->height,
-                 cl->width * 2, QImage::Format_RGB16);
+    int w = m_connection->framebufferWidth();
+    int h = m_connection->framebufferHeight();
+    const uint8_t *data = m_connection->framebufferData();
+
+    QImage image(data, w, h, w * 4, QImage::Format_RGB32);
 
     QPainter painter(this);
     painter.fillRect(rect(), Qt::black);
@@ -131,59 +140,60 @@ void VncViewerWidget::paintEvent(QPaintEvent *event)
 
 void VncViewerWidget::mousePressEvent(QMouseEvent *event)
 {
-    if (!m_connected || !m_connection || !m_connection->client()) return;
+    if (!m_connected || !m_connection) return;
     QPointF remote = mapToRemote(mousePos(event));
-    SendPointerEvent(m_connection->client(),
-                     static_cast<int>(remote.x()), static_cast<int>(remote.y()),
-                     mapMouseButton(event->button()));
+    m_connection->sendPointerEvent(
+        static_cast<int>(remote.x()), static_cast<int>(remote.y()),
+        mapMouseButton(event->button()));
 }
 
 void VncViewerWidget::mouseReleaseEvent(QMouseEvent *event)
 {
-    if (!m_connected || !m_connection || !m_connection->client()) return;
+    Q_UNUSED(event);
+    if (!m_connected || !m_connection) return;
     QPointF remote = mapToRemote(mousePos(event));
-    SendPointerEvent(m_connection->client(),
-                     static_cast<int>(remote.x()), static_cast<int>(remote.y()), 0);
+    m_connection->sendPointerEvent(
+        static_cast<int>(remote.x()), static_cast<int>(remote.y()), 0);
 }
 
 void VncViewerWidget::mouseMoveEvent(QMouseEvent *event)
 {
-    if (!m_connected || !m_connection || !m_connection->client()) return;
+    if (!m_connected || !m_connection) return;
     QPointF remote = mapToRemote(mousePos(event));
 
     int buttonMask = 0;
-    if (event->buttons() & Qt::LeftButton)   buttonMask |= rfbButton1Mask;
-    if (event->buttons() & Qt::MiddleButton) buttonMask |= rfbButton2Mask;
-    if (event->buttons() & Qt::RightButton)  buttonMask |= rfbButton3Mask;
+    if (event->buttons() & Qt::LeftButton)   buttonMask |= RFB_BUTTON1;
+    if (event->buttons() & Qt::MiddleButton) buttonMask |= RFB_BUTTON2;
+    if (event->buttons() & Qt::RightButton)  buttonMask |= RFB_BUTTON3;
 
-    SendPointerEvent(m_connection->client(),
-                     static_cast<int>(remote.x()), static_cast<int>(remote.y()),
-                     buttonMask);
+    m_connection->sendPointerEvent(
+        static_cast<int>(remote.x()), static_cast<int>(remote.y()), buttonMask);
 }
 
 void VncViewerWidget::wheelEvent(QWheelEvent *event)
 {
-    if (!m_connected || !m_connection || !m_connection->client()) return;
+    if (!m_connected || !m_connection) return;
     QPointF remote = mapToRemote(event->position());
 
-    int mask = event->angleDelta().y() > 0 ? rfbButton4Mask : rfbButton5Mask;
-    SendPointerEvent(m_connection->client(),
-                     static_cast<int>(remote.x()), static_cast<int>(remote.y()), mask);
-    SendPointerEvent(m_connection->client(),
-                     static_cast<int>(remote.x()), static_cast<int>(remote.y()), 0);
+    int mask = event->angleDelta().y() > 0 ? RFB_BUTTON4 : RFB_BUTTON5;
+    m_connection->sendPointerEvent(
+        static_cast<int>(remote.x()), static_cast<int>(remote.y()), mask);
+    m_connection->sendPointerEvent(
+        static_cast<int>(remote.x()), static_cast<int>(remote.y()), 0);
 }
 
 QRect VncViewerWidget::drawRect() const
 {
-    if (!m_connection || !m_connection->client()) return rect();
-    rfbClient *cl = m_connection->client();
+    if (!m_connection || m_connection->framebufferWidth() == 0) return rect();
+    int fw = m_connection->framebufferWidth();
+    int fh = m_connection->framebufferHeight();
 
-    double scaleX = static_cast<double>(width()) / cl->width;
-    double scaleY = static_cast<double>(height()) / cl->height;
+    double scaleX = static_cast<double>(width()) / fw;
+    double scaleY = static_cast<double>(height()) / fh;
     double scale = qMin(scaleX, scaleY);
 
-    int w = static_cast<int>(cl->width * scale);
-    int h = static_cast<int>(cl->height * scale);
+    int w = static_cast<int>(fw * scale);
+    int h = static_cast<int>(fh * scale);
     int x = (width() - w) / 2;
     int y = (height() - h) / 2;
 
@@ -193,8 +203,9 @@ QRect VncViewerWidget::drawRect() const
 QPointF VncViewerWidget::mapToRemote(QPointF localPos) const
 {
     QRect dr = drawRect();
-    double x = (localPos.x() - dr.x()) / dr.width() * m_connection->client()->width;
-    double y = (localPos.y() - dr.y()) / dr.height() * m_connection->client()->height;
-    return QPointF(qBound(0.0, x, (double)m_connection->client()->width),
-                   qBound(0.0, y, (double)m_connection->client()->height));
+    int fw = m_connection->framebufferWidth();
+    int fh = m_connection->framebufferHeight();
+    double x = (localPos.x() - dr.x()) / dr.width() * fw;
+    double y = (localPos.y() - dr.y()) / dr.height() * fh;
+    return QPointF(qBound(0.0, x, (double)fw), qBound(0.0, y, (double)fh));
 }
