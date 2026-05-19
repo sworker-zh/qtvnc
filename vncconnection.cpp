@@ -1,5 +1,6 @@
 #include "vncconnection.h"
 #include "rfbconnection.h"
+#include <QImage>
 
 VncConnection::VncConnection(QObject *parent)
     : QObject(parent)
