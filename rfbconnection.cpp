@@ -906,7 +906,7 @@ void RfbConnection::connectToHost(const QString &host, int port, const QString &
         // Flush queued input events from GUI thread
         if (m_idleCallback) m_idleCallback();
 
-        if (!m_socket->waitForReadyRead(33)) {
+        if (!m_socket->waitForReadyRead(5)) {
             if (m_socket->state() != QAbstractSocket::ConnectedState) {
                 emit errorOccurred(tr("Connection lost"));
                 break;

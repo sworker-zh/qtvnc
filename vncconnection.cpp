@@ -73,13 +73,19 @@ void VncConnection::stop()
 
 void VncConnection::updateSnapshot()
 {
-    QMutexLocker locker(&m_mutex);
-    m_fbSnapWidth = m_rfbConn->framebufferWidth();
-    m_fbSnapHeight = m_rfbConn->framebufferHeight();
+    // Copy data outside the lock to minimize contention
+    int w = m_rfbConn->framebufferWidth();
+    int h = m_rfbConn->framebufferHeight();
     const uint8_t *data = m_rfbConn->framebufferData();
-    if (data && m_fbSnapWidth > 0 && m_fbSnapHeight > 0) {
-        m_fbSnapshot.assign(data, data + (size_t)m_fbSnapWidth * m_fbSnapHeight * 4);
-    }
+    if (!data || w <= 0 || h <= 0) return;
+
+    std::vector<uint8_t> buf(data, data + (size_t)w * h * 4);
+
+    // Swap under lock — O(1) pointer swap instead of O(n) copy while locked
+    QMutexLocker locker(&m_mutex);
+    m_fbSnapWidth = w;
+    m_fbSnapHeight = h;
+    std::swap(m_fbSnapshot, buf);
 }
 
 void VncConnection::flushPendingEvents()
