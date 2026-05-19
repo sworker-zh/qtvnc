@@ -12,6 +12,8 @@ if(NOT Qt6_FOUND)
 endif()
 message(STATUS "Using Qt ${QT_VERSION_MAJOR}.${QT_VERSION_MINOR}.${QT_VERSION_PATCH}")
 
+find_package(ZLIB REQUIRED)
+
 add_executable(qtvnc
     main.cpp
     connectdialog.cpp
@@ -19,9 +21,11 @@ add_executable(qtvnc
     vncviewerwidget.cpp
     rfbconnection.cpp
     rfbcrypto.cpp
+    d3des.c
 )
 
 target_link_libraries(qtvnc PRIVATE
     Qt${QT_VERSION_MAJOR}::Widgets
     Qt${QT_VERSION_MAJOR}::Network
+    ZLIB::ZLIB
 )
