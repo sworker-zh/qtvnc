@@ -434,6 +434,10 @@ bool RfbConnection::handleHextileEncoding(int rx, int ry, int rw, int rh)
                 int sw = (wh >> 4) + 1;
                 int sh = (wh & 0x0F) + 1;
 
+                // Validate subrect stays within tile bounds
+                if (sx < tx || sy < ty || sx + sw > tx + tw || sy + sh > ty + th)
+                    return false;
+
                 for (int row = 0; row < sh; row++) {
                     uint32_t *line = reinterpret_cast<uint32_t *>(
                         m_framebuffer.data() + ((sy + row) * m_fbWidth + sx) * 4);
