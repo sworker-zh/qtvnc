@@ -6,6 +6,7 @@
 #include <QMouseEvent>
 #include <QWheelEvent>
 #include <QImage>
+#include <QKeyEvent>
 #include <QMutex>
 
 // Mouse button masks (RFB protocol)
@@ -14,6 +15,47 @@ static constexpr int RFB_BUTTON2 = 2;
 static constexpr int RFB_BUTTON3 = 4;
 static constexpr int RFB_BUTTON4 = 8;
 static constexpr int RFB_BUTTON5 = 16;
+
+// Map Qt::Key to X11 keysym for RFB key events
+static uint32_t qtKeyToX11Key(int qtKey)
+{
+    // ASCII printable range maps directly
+    if (qtKey >= 0x20 && qtKey <= 0x7E)
+        return qtKey;
+
+    // Special keys
+    switch (qtKey) {
+    case Qt::Key_Backspace:  return 0xFF08;
+    case Qt::Key_Tab:        return 0xFF09;
+    case Qt::Key_Return:     return 0xFF0D;
+    case Qt::Key_Enter:      return 0xFF0D;
+    case Qt::Key_Escape:     return 0xFF1B;
+    case Qt::Key_Insert:     return 0xFF63;
+    case Qt::Key_Delete:     return 0xFFFF;
+    case Qt::Key_Home:       return 0xFF50;
+    case Qt::Key_End:        return 0xFF57;
+    case Qt::Key_PageUp:     return 0xFF55;
+    case Qt::Key_PageDown:   return 0xFF56;
+    case Qt::Key_Left:       return 0xFF51;
+    case Qt::Key_Up:         return 0xFF52;
+    case Qt::Key_Right:      return 0xFF53;
+    case Qt::Key_Down:       return 0xFF54;
+    case Qt::Key_F1:         return 0xFFBE;
+    case Qt::Key_F2:         return 0xFFBF;
+    case Qt::Key_F3:         return 0xFFC0;
+    case Qt::Key_F4:         return 0xFFC1;
+    case Qt::Key_F5:         return 0xFFC2;
+    case Qt::Key_F6:         return 0xFFC3;
+    case Qt::Key_F7:         return 0xFFC4;
+    case Qt::Key_F8:         return 0xFFC5;
+    case Qt::Key_F9:         return 0xFFC6;
+    case Qt::Key_F10:        return 0xFFC7;
+    case Qt::Key_F11:        return 0xFFC8;
+    case Qt::Key_F12:        return 0xFFC9;
+    case Qt::Key_Space:      return 0x0020;
+    default:                 return qtKey;
+    }
+}
 
 VncViewerWidget::VncViewerWidget(QWidget *parent)
     : QWidget(parent)
@@ -184,6 +226,22 @@ void VncViewerWidget::mouseMoveEvent(QMouseEvent *event)
 
     m_connection->sendPointerEvent(
         static_cast<int>(remote.x()), static_cast<int>(remote.y()), buttonMask);
+}
+
+void VncViewerWidget::keyPressEvent(QKeyEvent *event)
+{
+    if (!m_connected || !m_connection) return;
+    event->accept();
+    uint32_t keysym = qtKeyToX11Key(event->key());
+    m_connection->sendKeyEvent(keysym, true);
+}
+
+void VncViewerWidget::keyReleaseEvent(QKeyEvent *event)
+{
+    if (!m_connected || !m_connection) return;
+    event->accept();
+    uint32_t keysym = qtKeyToX11Key(event->key());
+    m_connection->sendKeyEvent(keysym, false);
 }
 
 void VncViewerWidget::wheelEvent(QWheelEvent *event)
