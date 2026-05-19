@@ -36,9 +36,13 @@ const uint8_t *VncConnection::framebufferData() const
     return m_fbSnapshot.data();
 }
 
-QMutex &VncConnection::snapshotMutex() const
+QImage VncConnection::takeSnapshot() const
 {
-    return m_mutex;
+    QMutexLocker locker(&m_mutex);
+    if (m_fbSnapWidth <= 0 || m_fbSnapHeight <= 0 || m_fbSnapshot.empty())
+        return QImage();
+    return QImage(m_fbSnapshot.data(), m_fbSnapWidth, m_fbSnapHeight,
+                  m_fbSnapWidth * 4, QImage::Format_RGB32).copy();
 }
 
 void VncConnection::sendPointerEvent(int x, int y, int buttonMask)

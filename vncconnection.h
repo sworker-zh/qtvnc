@@ -27,10 +27,9 @@ public:
     int framebufferWidth() const;
     int framebufferHeight() const;
     const uint8_t *framebufferData() const;
+    QImage takeSnapshot() const;
     void sendPointerEvent(int x, int y, int buttonMask);
     void sendKeyEvent(int key, bool pressed);
-
-    QMutex &snapshotMutex() const;
 
 signals:
     void connected();

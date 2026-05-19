@@ -7,7 +7,6 @@
 #include <QWheelEvent>
 #include <QImage>
 #include <QKeyEvent>
-#include <QMutex>
 
 // Mouse button masks (RFB protocol)
 static constexpr int RFB_BUTTON1 = 1;
@@ -140,10 +139,8 @@ void VncViewerWidget::onFrameUpdated()
 void VncViewerWidget::onConnected()
 {
     m_connected = true;
-    if (m_connection) {
-        QMutexLocker locker(&m_connection->snapshotMutex());
+    if (m_connection)
         resize(m_connection->framebufferWidth(), m_connection->framebufferHeight());
-    }
 }
 
 void VncViewerWidget::onDisconnected()
@@ -171,17 +168,7 @@ void VncViewerWidget::paintEvent(QPaintEvent *event)
         return;
     }
 
-    // Copy framebuffer snapshot under mutex, then paint from local copy
-    QImage frameImage;
-    {
-        QMutexLocker locker(&m_connection->snapshotMutex());
-        int w = m_connection->framebufferWidth();
-        int h = m_connection->framebufferHeight();
-        const uint8_t *data = m_connection->framebufferData();
-        if (data && w > 0 && h > 0) {
-            frameImage = QImage(data, w, h, w * 4, QImage::Format_RGB32).copy();
-        }
-    }
+    QImage frameImage = m_connection->takeSnapshot();
 
     if (frameImage.isNull()) {
         QPainter p(this);
