@@ -3,8 +3,10 @@
 
 #include <QObject>
 #include <QString>
+#include <QMutex>
 #include <thread>
 #include <atomic>
+#include <vector>
 
 class RfbConnection;
 
@@ -22,11 +24,13 @@ public:
     void start();
     void stop();
 
-    RfbConnection *rfbConn() const;
     int framebufferWidth() const;
     int framebufferHeight() const;
     const uint8_t *framebufferData() const;
     void sendPointerEvent(int x, int y, int buttonMask);
+    void sendKeyEvent(int key, bool pressed);
+
+    QMutex &snapshotMutex() const;
 
 signals:
     void connected();
@@ -36,6 +40,8 @@ signals:
 
 private:
     void run();
+    void updateSnapshot();
+    void flushPendingEvents();
 
     QString m_host;
     int m_port = 5900;
@@ -43,6 +49,19 @@ private:
     RfbConnection *m_rfbConn = nullptr;
     std::atomic<bool> m_running{false};
     std::thread m_thread;
+
+    // Thread-safe framebuffer snapshot
+    mutable QMutex m_mutex;
+    std::vector<uint8_t> m_fbSnapshot;
+    int m_fbSnapWidth = 0;
+    int m_fbSnapHeight = 0;
+
+    // Queued input events (flushed on worker thread)
+    struct PointerEvent { int x, y, buttonMask; };
+    struct KeyEvent { int key; bool pressed; };
+    QMutex m_eventMutex;
+    std::vector<PointerEvent> m_pendingPointerEvents;
+    std::vector<KeyEvent> m_pendingKeyEvents;
 };
 
 #endif // VNCCONNECTION_H

@@ -6,6 +6,7 @@
 #include <QMouseEvent>
 #include <QWheelEvent>
 #include <QImage>
+#include <QMutex>
 
 // Mouse button masks (RFB protocol)
 static constexpr int RFB_BUTTON1 = 1;
@@ -98,6 +99,7 @@ void VncViewerWidget::onConnected()
 {
     m_connected = true;
     if (m_connection) {
+        QMutexLocker locker(&m_connection->snapshotMutex());
         resize(m_connection->framebufferWidth(), m_connection->framebufferHeight());
     }
 }
@@ -119,7 +121,7 @@ void VncViewerWidget::paintEvent(QPaintEvent *event)
 {
     Q_UNUSED(event);
 
-    if (!m_connection || !m_connection->framebufferData()) {
+    if (!m_connection) {
         QPainter p(this);
         p.fillRect(rect(), Qt::black);
         p.setPen(Qt::white);
@@ -127,15 +129,29 @@ void VncViewerWidget::paintEvent(QPaintEvent *event)
         return;
     }
 
-    int w = m_connection->framebufferWidth();
-    int h = m_connection->framebufferHeight();
-    const uint8_t *data = m_connection->framebufferData();
+    // Copy framebuffer snapshot under mutex, then paint from local copy
+    QImage frameImage;
+    {
+        QMutexLocker locker(&m_connection->snapshotMutex());
+        int w = m_connection->framebufferWidth();
+        int h = m_connection->framebufferHeight();
+        const uint8_t *data = m_connection->framebufferData();
+        if (data && w > 0 && h > 0) {
+            frameImage = QImage(data, w, h, w * 4, QImage::Format_RGB32).copy();
+        }
+    }
 
-    QImage image(data, w, h, w * 4, QImage::Format_RGB32);
+    if (frameImage.isNull()) {
+        QPainter p(this);
+        p.fillRect(rect(), Qt::black);
+        p.setPen(Qt::white);
+        p.drawText(rect(), Qt::AlignCenter, tr("Connecting..."));
+        return;
+    }
 
     QPainter painter(this);
     painter.fillRect(rect(), Qt::black);
-    painter.drawImage(drawRect(), image);
+    painter.drawImage(drawRect(), frameImage);
 }
 
 void VncViewerWidget::mousePressEvent(QMouseEvent *event)

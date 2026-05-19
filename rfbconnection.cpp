@@ -262,6 +262,24 @@ void RfbConnection::sendPointerEvent(int x, int y, int buttonMask)
     writeExact(msg, 6);
 }
 
+void RfbConnection::sendKeyEvent(int key, bool pressed)
+{
+    char msg[8];
+    msg[0] = RFB_MSG_KEY_EVENT;
+    msg[1] = pressed ? 1 : 0;
+    msg[2] = 0; msg[3] = 0;
+    msg[4] = (char)((key >> 24) & 0xFF);
+    msg[5] = (char)((key >> 16) & 0xFF);
+    msg[6] = (char)((key >> 8) & 0xFF);
+    msg[7] = (char)(key & 0xFF);
+    writeExact(msg, 8);
+}
+
+void RfbConnection::setIdleCallback(std::function<void()> cb)
+{
+    m_idleCallback = cb;
+}
+
 // --- Server message dispatch ---
 
 bool RfbConnection::handleServerMessage()
@@ -890,6 +908,9 @@ void RfbConnection::connectToHost(const QString &host, int port, const QString &
 
     // Main loop
     while (m_running) {
+        // Flush queued input events from GUI thread
+        if (m_idleCallback) m_idleCallback();
+
         if (!m_socket->waitForReadyRead(33)) {
             if (m_socket->state() != QAbstractSocket::ConnectedState) {
                 emit errorOccurred(tr("Connection lost"));

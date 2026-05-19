@@ -10,6 +10,7 @@
 #include "rfbprotocol.h"
 
 #include <zlib.h>
+#include <functional>
 
 class RfbConnection : public QObject
 {
@@ -22,6 +23,8 @@ public:
     void connectToHost(const QString &host, int port, const QString &password);
     void disconnect();
     void sendPointerEvent(int x, int y, int buttonMask);
+    void sendKeyEvent(int key, bool pressed);
+    void setIdleCallback(std::function<void()> cb);
 
     int framebufferWidth() const;
     int framebufferHeight() const;
@@ -104,6 +107,9 @@ private:
     // Tight working buffers
     std::vector<uint8_t> m_tightPalette;  // palette for current rect
     std::vector<uint8_t> m_tightPrevRow;  // previous row for gradient filter
+
+    // Idle callback for flushing queued input events
+    std::function<void()> m_idleCallback;
 };
 
 #endif // RFBCONNECTION_H
