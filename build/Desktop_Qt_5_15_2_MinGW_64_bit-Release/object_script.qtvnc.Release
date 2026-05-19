@@ -1,0 +1,11 @@
+release/main.o
+release/connectdialog.o
+release/vncconnection.o
+release/vncviewerwidget.o
+release/rfbconnection.o
+release/rfbcrypto.o
+release/d3des.o
+release/moc_connectdialog.o
+release/moc_vncconnection.o
+release/moc_vncviewerwidget.o
+release/moc_rfbconnection.o

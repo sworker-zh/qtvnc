@@ -1,0 +1,11 @@
+debug/main.o
+debug/connectdialog.o
+debug/vncconnection.o
+debug/vncviewerwidget.o
+debug/rfbconnection.o
+debug/rfbcrypto.o
+debug/d3des.o
+debug/moc_connectdialog.o
+debug/moc_vncconnection.o
+debug/moc_vncviewerwidget.o
+debug/moc_rfbconnection.o
