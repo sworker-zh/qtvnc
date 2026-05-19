@@ -537,10 +537,7 @@ bool RfbConnection::tightDecompress(int streamId, const char *compressed, int co
     if (ret != Z_OK && ret != Z_STREAM_END) return false;
 
     int produced = outLen - zs.avail_out;
-    if (produced != outLen) {
-        qDebug() << "[TIGHT] decompress incomplete: expected" << outLen << "got" << produced;
-        return false;
-    }
+    if (produced != outLen) return false;
     return true;
 }
 
@@ -683,12 +680,11 @@ bool RfbConnection::handleTightEncoding(int x, int y, int w, int h)
         uint32_t color = 0;
         if (m_tightCutZeros) {
             uint8_t rgb[3];
-            if (!readExact((char *)rgb, 3)) { qDebug() << "[TIGHT] Fill read3 failed"; return false; }
+            if (!readExact((char *)rgb, 3)) return false;
             color = (rgb[0] << 16) | (rgb[1] << 8) | rgb[2];
         } else {
-            if (!readExact((char *)&color, 4)) { qDebug() << "[TIGHT] Fill read4 failed"; return false; }
+            if (!readExact((char *)&color, 4)) return false;
         }
-        qDebug() << "[TIGHT] Fill color=0x" << hex << color;
         for (int row = 0; row < h; row++) {
             uint32_t *line = reinterpret_cast<uint32_t *>(
                 m_framebuffer.data() + ((y + row) * m_fbWidth + x) * 4);
@@ -701,13 +697,12 @@ bool RfbConnection::handleTightEncoding(int x, int y, int w, int h)
     // JPEG compression
     if (compCtl == RFB_TIGHT_JPEG) {
         int len = tightReadCompactLen();
-        if (len < 0) { qDebug() << "[TIGHT] JPEG compactLen failed"; return false; }
-        qDebug() << "[TIGHT] JPEG len=" << len;
+        if (len < 0) return false;
         QByteArray jpegData(len, 0);
-        if (!readExact(jpegData.data(), len)) { qDebug() << "[TIGHT] JPEG read failed"; return false; }
+        if (!readExact(jpegData.data(), len)) return false;
 
         QImage img;
-        if (!img.loadFromData(jpegData, "JPEG")) { qDebug() << "[TIGHT] JPEG decode failed"; return false; }
+        if (!img.loadFromData(jpegData, "JPEG")) return false;
 
         QImage converted = img.convertToFormat(QImage::Format_RGB32);
         for (int row = 0; row < std::min(h, converted.height()); row++) {
@@ -724,24 +719,23 @@ bool RfbConnection::handleTightEncoding(int x, int y, int w, int h)
     int filterId = RFB_TIGHT_FILTER_COPY;
     if (compCtl & RFB_TIGHT_EXPLICIT_FILTER) {
         uint8_t fb;
-        if (!readExact((char *)&fb, 1)) { qDebug() << "[TIGHT] filter read failed"; return false; }
+        if (!readExact((char *)&fb, 1)) return false;
         filterId = fb;
     }
     int streamId = compCtl & RFB_TIGHT_MAX_SERVER_STREAM;
-    qDebug() << "[TIGHT] filter=" << filterId << "streamId=" << streamId;
 
     // Read palette for palette filter
     int bytesPerPixel = m_tightCutZeros ? 3 : 4;
     int bitsPerPixel = m_tightCutZeros ? 24 : 32;
     if (filterId == RFB_TIGHT_FILTER_PALETTE) {
         uint8_t numColors;
-        if (!readExact((char *)&numColors, 1)) { qDebug() << "[TIGHT] palette count read failed"; return false; }
+        if (!readExact((char *)&numColors, 1)) return false;
         int paletteSize = numColors + 1;
         m_tightPalette.resize(paletteSize * 4, 0);
         int paletteBytes = paletteSize * bytesPerPixel;
         std::vector<char> palBuf(paletteBytes);
         if (!readExact(palBuf.data(), paletteBytes))
-        { qDebug() << "[TIGHT] palette data read failed"; return false; }
+            return false;
         for (int i = 0; i < paletteSize; i++) {
             if (m_tightCutZeros) {
                 uint8_t r = static_cast<uint8_t>(palBuf[i * 3]);
@@ -760,12 +754,11 @@ bool RfbConnection::handleTightEncoding(int x, int y, int w, int h)
 
     int rowSize = (w * bitsPerPixel + 7) / 8;
     int totalDataLen = rowSize * h;
-    qDebug() << "[TIGHT] bitsPerPixel=" << bitsPerPixel << "rowSize=" << rowSize << "totalDataLen=" << totalDataLen;
 
     // For small data, it's sent uncompressed
     if (totalDataLen < RFB_TIGHT_MIN_TO_COMPRESS) {
         std::vector<char> buf(totalDataLen);
-        if (!readExact(buf.data(), totalDataLen)) { qDebug() << "[TIGHT] small data read failed"; return false; }
+        if (!readExact(buf.data(), totalDataLen)) return false;
 
         switch (filterId) {
         case RFB_TIGHT_FILTER_COPY:
@@ -782,18 +775,16 @@ bool RfbConnection::handleTightEncoding(int x, int y, int w, int h)
 
     // Read compressed data
     int compressedLen = tightReadCompactLen();
-    if (compressedLen < 0) { qDebug() << "[TIGHT] compactLen failed"; return false; }
-    qDebug() << "[TIGHT] compressedLen=" << compressedLen;
+    if (compressedLen < 0) return false;
     std::vector<char> compressed(compressedLen);
-    if (!readExact(compressed.data(), compressedLen)) { qDebug() << "[TIGHT] compressed read failed"; return false; }
+    if (!readExact(compressed.data(), compressedLen)) return false;
 
     // Decompress
     std::vector<char> decompressed(totalDataLen);
     if (!tightDecompress(streamId, compressed.data(), compressedLen,
                          decompressed.data(), totalDataLen))
-    { qDebug() << "[TIGHT] decompress failed"; return false; }
+    { return false; }
 
-    qDebug() << "[TIGHT] decompress OK, applying filter" << filterId;
     switch (filterId) {
     case RFB_TIGHT_FILTER_COPY:
         return tightFilterCopy(decompressed.data(), totalDataLen, x, y, w, h);
