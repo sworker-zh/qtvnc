@@ -25,6 +25,15 @@ int RfbConnection::framebufferWidth() const { return m_fbWidth; }
 int RfbConnection::framebufferHeight() const { return m_fbHeight; }
 const uint8_t *RfbConnection::framebufferData() const { return m_framebuffer.data(); }
 
+bool RfbConnection::validateRect(int x, int y, int w, int h) const
+{
+    if (x < 0 || y < 0 || w <= 0 || h <= 0) return false;
+    if (x + w > m_fbWidth || y + h > m_fbHeight) return false;
+    // Check for integer overflow in row offset calculation
+    if (static_cast<long long>(y) * m_fbWidth + x > INT_MAX / 4) return false;
+    return true;
+}
+
 void RfbConnection::cleanupZlib()
 {
     if (m_decompStreamInited) {
@@ -187,6 +196,10 @@ bool RfbConnection::serverInit()
     memset(pfMsg + 17, 0, 3);
     if (!writeExact(pfMsg, 20)) return false;
 
+    // Check for zero or overflow in framebuffer size
+    if (m_fbWidth <= 0 || m_fbHeight <= 0) return false;
+    if (static_cast<long long>(m_fbWidth) * m_fbHeight * 4 > INT_MAX) return false;
+
     m_framebuffer.resize(m_fbWidth * m_fbHeight * 4, 0);
 
     // Tight cutZeros: our requested format is 32bpp depth 24 with all max 255
@@ -286,11 +299,11 @@ bool RfbConnection::handleFramebufferUpdate()
 
         bool ok = false;
         switch (enc) {
-        case RFB_ENCODING_RAW:         ok = handleRawEncoding(x, y, w, h); break;
-        case RFB_ENCODING_COPYRECT:    ok = handleCopyRectEncoding(x, y, w, h); break;
-        case RFB_ENCODING_HEXTILE:     ok = handleHextileEncoding(x, y, w, h); break;
-        case RFB_ENCODING_ZLIB:        ok = handleZlibEncoding(x, y, w, h); break;
-        case RFB_ENCODING_TIGHT:       ok = handleTightEncoding(x, y, w, h); break;
+        case RFB_ENCODING_RAW:         ok = validateRect(x, y, w, h) && handleRawEncoding(x, y, w, h); break;
+        case RFB_ENCODING_COPYRECT:    ok = validateRect(x, y, w, h) && handleCopyRectEncoding(x, y, w, h); break;
+        case RFB_ENCODING_HEXTILE:     ok = validateRect(x, y, w, h) && handleHextileEncoding(x, y, w, h); break;
+        case RFB_ENCODING_ZLIB:        ok = validateRect(x, y, w, h) && handleZlibEncoding(x, y, w, h); break;
+        case RFB_ENCODING_TIGHT:       ok = validateRect(x, y, w, h) && handleTightEncoding(x, y, w, h); break;
         case RFB_ENCODING_DESKTOPSIZE: ok = handleDesktopSizeEncoding(x, y, w, h); break;
         case RFB_ENCODING_CURSOR:      ok = handleCursorEncoding(x, y, w, h); break;
         default:
@@ -326,6 +339,12 @@ bool RfbConnection::handleCopyRectEncoding(int x, int y, int w, int h)
     if (!readExact(srcBuf, 4)) return false;
     int srcX = (uint8_t)srcBuf[0] << 8 | (uint8_t)srcBuf[1];
     int srcY = (uint8_t)srcBuf[2] << 8 | (uint8_t)srcBuf[3];
+
+    // Validate source rect bounds
+    if (!validateRect(srcX, srcY, w, h)) {
+        qWarning() << "[VNC] CopyRect source rect out of bounds:" << srcX << srcY << w << h;
+        return false;
+    }
 
     std::vector<uint8_t> temp(w * h * 4);
     for (int row = 0; row < h; row++) {
@@ -417,7 +436,13 @@ bool RfbConnection::handleZlibEncoding(int x, int y, int w, int h)
     uint32_t compressedLen = (uint8_t)hdr[0] << 24 | (uint8_t)hdr[1] << 16 |
                              (uint8_t)hdr[2] << 8  | (uint8_t)hdr[3];
 
+    // Check for integer overflow
+    if (w <= 0 || h <= 0 || static_cast<long long>(w) * h * 4 > INT_MAX) return false;
+
     int rawLen = w * h * 4;
+    // Sanity check on compressed length
+    if (compressedLen > 64 * 1024 * 1024) return false;
+
     std::vector<char> compressed(compressedLen);
     std::vector<uint8_t> rawBuf(rawLen);
 
@@ -464,6 +489,8 @@ int RfbConnection::tightReadCompactLen()
 
     if (!readExact((char *)&b, 1)) return -1;
     len |= (b & 0xFF) << 14;
+    // Sanity check: cap at 64MB to prevent excessive memory allocation
+    if (len > 64 * 1024 * 1024) return -1;
     return len;
 }
 
@@ -760,6 +787,7 @@ bool RfbConnection::handleTightEncoding(int x, int y, int w, int h)
 
 bool RfbConnection::handleDesktopSizeEncoding(int x, int y, int w, int h)
 {
+    if (w <= 0 || h <= 0 || static_cast<long long>(w) * h * 4 > INT_MAX) return false;
     m_fbWidth = w;
     m_fbHeight = h;
     m_framebuffer.assign(w * h * 4, 0);

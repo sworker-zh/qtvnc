@@ -70,6 +70,9 @@ private:
     bool tightFilterPalette(const char *src, int srcLen, int x, int y, int w, int h, int paletteSize);
     bool tightFilterGradient(const char *src, int srcLen, int x, int y, int w, int h);
 
+    // Validate rect coordinates against framebuffer bounds
+    bool validateRect(int x, int y, int w, int h) const;
+
     // zlib stream cleanup
     void cleanupZlib();
 
