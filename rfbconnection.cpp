@@ -50,15 +50,62 @@ void RfbConnection::cleanupZlib()
 
 bool RfbConnection::readExact(char *buf, int len)
 {
+    // 分片等待：每片 sliceMs 便于响应 stop()；总超时 maxStallMs 容忍设备 CPU 卡顿（如测量时）
+    const int sliceMs = 500;
+    const int maxStallMs = 30000;
     int total = 0;
+    int stalledMs = 0;
+
     while (total < len) {
+        if (!m_running) {
+            qWarning() << "[VNC] readExact aborted by stop: need" << len << "got" << total;
+            return false;
+        }
+
         qint64 n = m_socket->read(buf + total, len - total);
-        if (n < 0) return false;
-        if (n == 0) {
-            if (!m_socket->waitForReadyRead(5000)) return false;
+        if (n < 0) {
+            qWarning() << "[VNC] readExact read error: need" << len << "got" << total
+                       << "state:" << m_socket->state()
+                       << "error:" << m_socket->error() << m_socket->errorString();
+            return false;
+        }
+        if (n > 0) {
+            total += n;
+            stalledMs = 0;
             continue;
         }
-        total += n;
+
+        // n == 0：缓冲区暂无数据，等待
+        if (m_socket->state() != QAbstractSocket::ConnectedState) {
+            qWarning() << "[VNC] readExact socket disconnected: need" << len << "got" << total
+                       << "state:" << m_socket->state()
+                       << "error:" << m_socket->error() << m_socket->errorString();
+            return false;
+        }
+        if (m_socket->waitForReadyRead(sliceMs)) {
+            // 有数据到达，回循环去 read
+            stalledMs = 0;
+            continue;
+        }
+
+        // waitForReadyRead 返回 false：区分纯超时与真正的 socket 错误
+        QAbstractSocket::SocketError err = m_socket->error();
+        if (err != QAbstractSocket::UnknownSocketError
+            && err != QAbstractSocket::SocketTimeoutError) {
+            qWarning() << "[VNC] readExact wait error: need" << len << "got" << total
+                       << "state:" << m_socket->state()
+                       << "error:" << err << m_socket->errorString();
+            return false;
+        }
+        // 纯超时：累加停滞时间，达到上限才放弃（容忍慢设备/慢网络）
+        stalledMs += sliceMs;
+        if (stalledMs >= maxStallMs) {
+            qWarning() << "[VNC] readExact stall timeout(" << maxStallMs << "ms): need"
+                       << len << "got" << total
+                       << "state:" << m_socket->state()
+                       << "error:" << err << m_socket->errorString();
+            return false;
+        }
     }
     return true;
 }
@@ -906,8 +953,17 @@ void RfbConnection::connectToHost(const QString &host, int port, const QString &
         // Flush queued input events from GUI thread
         if (m_idleCallback) m_idleCallback();
 
-        if (!m_socket->waitForReadyRead(5)) {
-            if (m_socket->state() != QAbstractSocket::ConnectedState) {
+        // 50ms 等待：兼顾输入延迟与 CPU 占用。对端正常关闭时 waitForReadyRead
+        // 会立即返回 false 并设置 error（如 RemoteHostClosedError），无需等满 50ms。
+        if (!m_socket->waitForReadyRead(50)) {
+            QAbstractSocket::SocketState st = m_socket->state();
+            QAbstractSocket::SocketError err = m_socket->error();
+            // 纯超时（SocketTimeoutError + ConnectedState）属正常：屏幕静止时 server 不发包
+            if (st == QAbstractSocket::UnconnectedState
+                || (err != QAbstractSocket::UnknownSocketError
+                    && err != QAbstractSocket::SocketTimeoutError)) {
+                qWarning() << "[VNC] main loop: connection lost. state:" << st
+                           << "error:" << err << m_socket->errorString();
                 emit errorOccurred(tr("Connection lost"));
                 break;
             }
@@ -918,7 +974,12 @@ void RfbConnection::connectToHost(const QString &host, int port, const QString &
         bool gotFrame = false;
         while (m_socket->bytesAvailable() > 0 && m_running) {
             if (!handleServerMessage()) {
-                if (m_running) emit errorOccurred(tr("Server communication error"));
+                if (m_running) {
+                    qWarning() << "[VNC] handleServerMessage failed. state:" << m_socket->state()
+                               << "error:" << m_socket->error() << m_socket->errorString()
+                               << "bytesAvailable:" << m_socket->bytesAvailable();
+                    emit errorOccurred(tr("Server communication error"));
+                }
                 goto done;
             }
             gotFrame = true;
